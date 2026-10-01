@@ -54,7 +54,8 @@ guandan-server/third_party/googletest/build/
 # 如果 .pb.cc / .pb.h 是脚本生成，忽略；若提交进仓库就注释掉下面两行
 guandan-server/src/proto/*.pb.cc
 guandan-server/src/proto/*.pb.h
-guandan-client/assets/scripts/net/pb/*.ts
+# 手写 protobuf 编解码（非生成代码，需提交进仓库）
+# guandan-client/assets/scripts/net/pb/*.ts
 
 # ========== 依赖库（uWebSockets 若用子模块则别忽略） ==========
 # guandan-server/third_party/uwebsockets/

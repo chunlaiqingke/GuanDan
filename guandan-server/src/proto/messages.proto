@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package guandan;
+
+// =====================================================================
+// Phase 01 基础消息定义
+// 每个 WS 二进制帧 = 一条完整业务消息，帧格式：[2B cmd][2B ver][4B len][body]
+// =====================================================================
+
+// ---- 1001 C2S_Login ----
+message LoginReq {
+  string uid = 1;    // 玩家 uid
+  string token = 2;  // 鉴权 token
+}
+
+// ---- 1002 S2C_LoginAck ----
+message LoginAck {
+  int32 code = 1;        // 0 = 成功
+  int64 player_id = 2;   // 服务端分配的玩家 id
+  string msg = 3;        // 附加信息
+}
+
+// ---- 房间规则配置（Phase 01 占位，后续 Phase 02 扩展）----
+message RoomRuleConfig {
+  int32 level = 1;        // 当前级牌点数（2~A，占位）
+  bool enable_gong = 2;   // 是否进贡
+}
+
+// ---- 2001 C2S_CreateRoom ----
+message CreateRoomReq {
+  RoomRuleConfig rule = 1;
+}
+
+// ---- 2002 S2C_CreateRoomAck ----
+message CreateRoomAck {
+  int32 code = 1;      // 0 = 成功
+  string room_id = 2;  // 房间号
+  string msg = 3;
+}
+
+// ---- 2003 C2S_JoinRoom ----
+message JoinRoomReq {
+  string room_id = 1;
+}
+
+// ---- 房间玩家快照 ----
+message RoomPlayer {
+  int64 player_id = 1;
+  string name = 2;
+  int32 seat = 3;      // 座位号 0~3
+}
+
+// ---- 2004 S2C_RoomState ----
+message RoomState {
+  int32 code = 1;                     // 0 = 成功
+  string room_id = 2;
+  repeated RoomPlayer players = 3;
+  string msg = 4;
+}
+
+// ---- 2005 C2S_Reconnect ----
+message ReconnectReq {
+  int64 player_id = 1;
+  string room_id = 2;
+}
+
+// ---- 9001 C2S_Heartbeat ----
+message HeartbeatReq {
+  int64 ts = 1;  // 客户端时间戳
+}
+
+// ---- 9002 S2C_HeartbeatAck ----
+message HeartbeatAck {
+  int64 ts = 1;  // 回显时间戳
+}
+
+// ---- 9999 S2C_Error ----
+message ErrorMsg {
+  int32 code = 1;
+  string msg = 2;
+}
