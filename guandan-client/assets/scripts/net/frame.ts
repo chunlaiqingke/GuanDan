@@ -11,7 +11,10 @@ export interface FrameHeader {
 }
 
 /** 组装完整业务帧：cmd + body -> 帧字节。 */
-export function encodeFrame(cmd: number, body: Uint8Array): Uint8Array {
+// 不显式标注返回 Uint8Array：TS5.7+ 的 Uint8Array 是泛型（Uint8Array<ArrayBufferLike>），
+// 标注会擦掉底层为普通 ArrayBuffer 的信息，导致 WebSocket.send() 报 TS2345。
+// 交给 TS 推断，即可得到 Uint8Array<ArrayBuffer>（旧版 TS 则推断为普通 Uint8Array）。
+export function encodeFrame(cmd: number, body: Uint8Array) {
   const out = new Uint8Array(FRAME_HEADER_SIZE + body.byteLength);
   const dv = new DataView(out.buffer, out.byteOffset, out.byteLength);
   dv.setUint16(0, cmd, true); // 小端

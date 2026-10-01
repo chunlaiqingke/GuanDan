@@ -18,8 +18,8 @@ export class WsClient {
 
   private manualClose = false;
   private reconnectAttempts = 0;
-  private reconnectTimer: number | null = null;
-  private heartbeatTimer: number | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private onOpenCb: (() => void) | null = null;
   private onCloseCb: (() => void) | null = null;
