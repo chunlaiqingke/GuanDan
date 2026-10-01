@@ -1,0 +1,71 @@
+# ========== 通用 ==========
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.log
+logs/
+
+# ========== Cocos Creator 客户端 ==========
+guandan-client/library/
+guandan-client/temp/
+guandan-client/build/
+guandan-client/dist/
+guandan-client/local/
+guandan-client/profiles/
+guandan-client/packages/
+guandan-client/settings/project.json.bak
+# Cocos 自动生成的本地配置（含路径、最近打开等）
+guandan-client/**/*.js.map
+guandan-client/**/*.d.ts.map
+# 原生构建产物
+guandan-client/native/build/
+guandan-client/native/engine/
+guandan-client/platforms/
+# 生成的 protobuf ts 代码（如果由脚本生成，可忽略；若手改则别忽略）
+# guandan-client/assets/scripts/net/pb/
+
+# ========== C++ / CMake 服务端 ==========
+guandan-server/build/
+guandan-server/cmake-build-*/
+guandan-server/**/*.o
+guandan-server/**/*.obj
+guandan-server/**/*.a
+guandan-server/**/*.so
+guandan-server/**/*.dylib
+guandan-server/**/*.exe
+guandan-server/**/*.out
+guandan-server/**/.o
+# 编译缓存
+*.gcda
+*.gcno
+*.gcov
+compile_commands.json
+
+# ========== googletest 子模块说明 ==========
+# 子模块本身跟踪，但忽略其构建产物
+guandan-server/third_party/googletest/build/
+
+# ========== Protobuf 生成文件（可选忽略，推荐生成式） ==========
+# 如果 .pb.cc / .pb.h 是脚本生成，忽略；若提交进仓库就注释掉下面两行
+guandan-server/src/proto/*.pb.cc
+guandan-server/src/proto/*.pb.h
+guandan-client/assets/scripts/net/pb/*.ts
+
+# ========== 依赖库（uWebSockets 若用子模块则别忽略） ==========
+# guandan-server/third_party/uwebsockets/
+
+# ========== 本地环境 ==========
+.env
+.env.local
+*.local
+run.sh.bak
+
+# ========== 测试产物 ==========
+guandan-server/**/test_* 
+!guandan-server/**/test_*.cpp
+!guandan-server/**/test_*.h
