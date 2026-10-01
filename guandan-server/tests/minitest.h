@@ -11,85 +11,85 @@
 
 namespace minitest {
 
-struct TestCase {
-  std::string name;
-  std::function<void()> fn;
-};
+  struct TestCase {
+    std::string name;
+    std::function<void()> fn;
+  };
 
-inline std::vector<TestCase>& registry() {
-  static std::vector<TestCase> r;
-  return r;
-}
-
-struct Registrar {
-  Registrar(const std::string& name, std::function<void()> fn) {
-    registry().push_back({name, std::move(fn)});
+  inline std::vector<TestCase>& registry() {
+    static std::vector<TestCase> r;
+    return r;
   }
-};
 
-inline int& failureCount() {
-  static int c = 0;
-  return c;
-}
-inline std::string& currentTest() {
-  static std::string s;
-  return s;
-}
+  struct Registrar {
+    Registrar(const std::string& name, std::function<void()> fn) {
+      registry().push_back({name, std::move(fn)});
+    }
+  };
 
-inline void reportFailure(const std::string& expr, const std::string& file, int line) {
-  ++failureCount();
-  std::cerr << "  [FAIL] " << currentTest() << ": " << expr << " (" << file << ":" << line
-            << ")\n";
-}
-
-template <typename T>
-inline void checkTrue(const T& cond, const char* expr, const char* file, int line) {
-  if (!cond) reportFailure(std::string("EXPECT_TRUE(") + expr + ")", file, line);
-}
-
-template <typename A, typename B>
-inline void checkEq(const A& a, const B& b, const char* ea, const char* eb, const char* file,
-                    int line) {
-  if (!(a == b)) {
-    std::ostringstream oss;
-    oss << "EXPECT_EQ(" << ea << ", " << eb << ")";
-    reportFailure(oss.str(), file, line);
+  inline int& failureCount() {
+    static int c = 0;
+    return c;
   }
-}
-
-template <typename A, typename B>
-inline void checkNe(const A& a, const B& b, const char* ea, const char* eb, const char* file,
-                    int line) {
-  if (a == b) {
-    std::ostringstream oss;
-    oss << "EXPECT_NE(" << ea << ", " << eb << ")";
-    reportFailure(oss.str(), file, line);
+  inline std::string& currentTest() {
+    static std::string s;
+    return s;
   }
-}
 
-inline void checkStrEq(const std::string& a, const std::string& b, const char* ea, const char* eb,
-                       const char* file, int line) {
-  if (a != b) {
-    std::ostringstream oss;
-    oss << "EXPECT_STREQ(" << ea << ", " << eb << ") got '" << a << "' vs '" << b << "'";
-    reportFailure(oss.str(), file, line);
+  inline void reportFailure(const std::string& expr, const std::string& file, int line) {
+    ++failureCount();
+    std::cerr << "  [FAIL] " << currentTest() << ": " << expr << " (" << file << ":" << line
+              << ")\n";
   }
-}
 
-inline int runAll() {
-  int passed = 0;
-  for (auto& t : registry()) {
-    currentTest() = t.name;
-    const int before = failureCount();
-    t.fn();
-    if (failureCount() == before) {
-      ++passed;
-      std::cout << "[PASS] " << t.name << "\n";
+  template <typename T>
+  inline void checkTrue(const T& cond, const char* expr, const char* file, int line) {
+    if (!cond) reportFailure(std::string("EXPECT_TRUE(") + expr + ")", file, line);
+  }
+
+  template <typename A, typename B>
+  inline void checkEq(const A& a, const B& b, const char* ea, const char* eb, const char* file,
+                      int line) {
+    if (!(a == b)) {
+      std::ostringstream oss;
+      oss << "EXPECT_EQ(" << ea << ", " << eb << ")";
+      reportFailure(oss.str(), file, line);
     }
   }
-  std::cout << passed << "/" << registry().size() << " tests passed\n";
-  return failureCount() == 0 ? 0 : 1;
-}
+
+  template <typename A, typename B>
+  inline void checkNe(const A& a, const B& b, const char* ea, const char* eb, const char* file,
+                      int line) {
+    if (a == b) {
+      std::ostringstream oss;
+      oss << "EXPECT_NE(" << ea << ", " << eb << ")";
+      reportFailure(oss.str(), file, line);
+    }
+  }
+
+  inline void checkStrEq(const std::string& a, const std::string& b, const char* ea, const char* eb,
+                         const char* file, int line) {
+    if (a != b) {
+      std::ostringstream oss;
+      oss << "EXPECT_STREQ(" << ea << ", " << eb << ") got '" << a << "' vs '" << b << "'";
+      reportFailure(oss.str(), file, line);
+    }
+  }
+
+  inline int runAll() {
+    int passed = 0;
+    for (auto& t : registry()) {
+      currentTest() = t.name;
+      const int before = failureCount();
+      t.fn();
+      if (failureCount() == before) {
+        ++passed;
+        std::cout << "[PASS] " << t.name << "\n";
+      }
+    }
+    std::cout << passed << "/" << registry().size() << " tests passed\n";
+    return failureCount() == 0 ? 0 : 1;
+  }
 
 }  // namespace minitest
 

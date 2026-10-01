@@ -12,10 +12,10 @@
 #if GUANDAN_HAS_SPDLOG
 #  include <spdlog/spdlog.h>
 namespace guandan::util {
-inline void initLog() {
-  spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
-  spdlog::set_level(spdlog::level::debug);
-}
+  inline void initLog() {
+    spdlog::set_pattern("[%H:%M:%S.%e] [%^%l%$] %v");
+    spdlog::set_level(spdlog::level::debug);
+  }
 }  // namespace guandan::util
 #  define GD_LOG_TRACE(...) ::spdlog::trace(__VA_ARGS__)
 #  define GD_LOG_DEBUG(...) ::spdlog::debug(__VA_ARGS__)
@@ -26,25 +26,25 @@ inline void initLog() {
 #  include <cstdio>
 #  include <sstream>
 namespace guandan::util {
-inline void initLog() {}
-// 极简 {} 占位符格式化（仅无 spdlog 时使用）。
-template <typename... Args>
-inline std::string format(std::string fmt, Args&&... args) {
-  std::string out;
-  size_t pos = 0;
-  auto append = [&](const auto& v) {
-    const size_t p = fmt.find("{}", pos);
-    if (p == std::string::npos) return;
-    out += fmt.substr(pos, p - pos);
-    std::ostringstream oss;
-    oss << v;
-    out += oss.str();
-    pos = p + 2;
-  };
-  (append(args), ...);
-  out += fmt.substr(pos);
-  return out;
-}
+  inline void initLog() {}
+  // 极简 {} 占位符格式化（仅无 spdlog 时使用）。
+  template <typename... Args>
+  inline std::string format(std::string fmt, Args&&... args) {
+    std::string out;
+    size_t pos = 0;
+    auto append = [&](const auto& v) {
+      const size_t p = fmt.find("{}", pos);
+      if (p == std::string::npos) return;
+      out += fmt.substr(pos, p - pos);
+      std::ostringstream oss;
+      oss << v;
+      out += oss.str();
+      pos = p + 2;
+    };
+    (append(args), ...);
+    out += fmt.substr(pos);
+    return out;
+  }
 }  // namespace guandan::util
 #  define GD_LOG_IMPL(level, fmt, ...)                                            \
     do {                                                                          \
