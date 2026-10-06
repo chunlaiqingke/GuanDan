@@ -26,3 +26,13 @@ add_executable(test_guandan test_guandan.cpp)
 target_link_libraries(test_guandan PRIVATE guandan_core)
 target_include_directories(test_guandan PRIVATE ${MINITEST_INCLUDE})
 add_test(NAME test_guandan COMMAND test_guandan)
+
+add_executable(test_gametable test_gametable.cpp)
+target_link_libraries(test_gametable PRIVATE guandan_core)
+target_include_directories(test_gametable PRIVATE ${MINITEST_INCLUDE})
+add_test(NAME test_gametable COMMAND test_gametable)
+
+add_executable(test_game_flow test_game_flow.cpp)
+target_link_libraries(test_game_flow PRIVATE guandan_core Threads::Threads)
+target_include_directories(test_game_flow PRIVATE ${MINITEST_INCLUDE})
+add_test(NAME test_game_flow COMMAND test_game_flow)

@@ -186,3 +186,213 @@ export function decodeError(b: Uint8Array): ErrorMsg {
   }
   return out;
 }
+
+// =====================================================================
+// Phase 03 对战流消息
+// =====================================================================
+
+export interface SetHostReq {
+  host: boolean;
+}
+
+export interface TurnStart {
+  uid: number;
+  deadlineTs: number;
+  canPass: boolean;
+}
+
+export interface Tick {
+  remainMs: number;
+}
+
+export interface AutoPlay {
+  uid: number;
+  cards: number[];
+  isPass: boolean;
+}
+
+export interface HostMode {
+  uid: number;
+  isHost: boolean;
+}
+
+export interface PlayReq {
+  cards: number[];
+}
+
+export interface Deal {
+  level: number;
+  yourSeat: number;
+  cards: number[];
+  seats: number[];
+}
+
+export interface RoundEnd {
+  finishOrder: number[];
+  levelUp: number;
+  lastUid: number;
+}
+
+export interface GameStart {
+  level: number;
+  firstUid: number;
+}
+
+export interface PlayResultMsg {
+  uid: number;
+  cards: number[];
+}
+
+export interface PassResultMsg {
+  uid: number;
+}
+
+// 读取 packed repeated varint（protoc 对 proto3 标量 repeated 默认打包）。
+function readPackedVarints(b: Uint8Array): number[] {
+  const r = new Reader(b);
+  const out: number[] = [];
+  while (!r.eof) out.push(r.readVarint());
+  return out;
+}
+
+// ---- 编码 ----
+
+export function encodeSetHostReq(m: SetHostReq): Uint8Array {
+  const w = new Writer();
+  w.writeBool(1, m.host);
+  return w.finish();
+}
+
+export function encodePlayReq(m: PlayReq): Uint8Array {
+  const w = new Writer();
+  for (const c of m.cards) w.writeInt32(1, c);
+  return w.finish();
+}
+
+export function encodePassReq(): Uint8Array {
+  return new Writer().finish();
+}
+
+// ---- 解码 ----
+
+export function decodeTurnStart(b: Uint8Array): TurnStart {
+  const r = new Reader(b);
+  const out: TurnStart = { uid: 0, deadlineTs: 0, canPass: false };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.uid = r.readVarint();
+    else if (fieldNo === 2) out.deadlineTs = r.readVarint();
+    else if (fieldNo === 3) out.canPass = r.readVarint() !== 0;
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeTick(b: Uint8Array): Tick {
+  const r = new Reader(b);
+  const out: Tick = { remainMs: 0 };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.remainMs = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeAutoPlay(b: Uint8Array): AutoPlay {
+  const r = new Reader(b);
+  const out: AutoPlay = { uid: 0, cards: [], isPass: false };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.uid = r.readVarint();
+    else if (fieldNo === 2) out.cards.push(...readPackedVarints(r.readBytes()));
+    else if (fieldNo === 3) out.isPass = r.readVarint() !== 0;
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeHostMode(b: Uint8Array): HostMode {
+  const r = new Reader(b);
+  const out: HostMode = { uid: 0, isHost: false };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.uid = r.readVarint();
+    else if (fieldNo === 2) out.isHost = r.readVarint() !== 0;
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeDeal(b: Uint8Array): Deal {
+  const r = new Reader(b);
+  const out: Deal = { level: 0, yourSeat: -1, cards: [], seats: [] };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.level = r.readVarint();
+    else if (fieldNo === 2) out.yourSeat = r.readVarint();
+    else if (fieldNo === 3) out.cards.push(...readPackedVarints(r.readBytes()));
+    else if (fieldNo === 4) out.seats.push(...readPackedVarints(r.readBytes()));
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeRoundEnd(b: Uint8Array): RoundEnd {
+  const r = new Reader(b);
+  const out: RoundEnd = { finishOrder: [], levelUp: 0, lastUid: 0 };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.finishOrder.push(...readPackedVarints(r.readBytes()));
+    else if (fieldNo === 2) out.levelUp = r.readVarint();
+    else if (fieldNo === 3) out.lastUid = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodeGameStart(b: Uint8Array): GameStart {
+  const r = new Reader(b);
+  const out: GameStart = { level: 0, firstUid: 0 };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.level = r.readVarint();
+    else if (fieldNo === 2) out.firstUid = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodePlayResult(b: Uint8Array): PlayResultMsg {
+  const r = new Reader(b);
+  const out: PlayResultMsg = { uid: 0, cards: [] };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.uid = r.readVarint();
+    else if (fieldNo === 2) out.cards.push(...readPackedVarints(r.readBytes()));
+    else r.skip(wt);
+  }
+  return out;
+}
+
+export function decodePassResult(b: Uint8Array): PassResultMsg {
+  const r = new Reader(b);
+  const out: PassResultMsg = { uid: 0 };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.uid = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+

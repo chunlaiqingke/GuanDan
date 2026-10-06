@@ -22,6 +22,8 @@ int main(int argc, char** argv) {
       [&](guandan::net::WsSession& s, const uint8_t* d, size_t n) { dispatcher.onBinary(s, d, n); });
   server.setOnDisconnect(
       [&](guandan::net::WsSession& s) { dispatcher.onDisconnect(s); });
+  server.setOnTick(
+      [&](int64_t nowMs) { dispatcher.onTick(nowMs); });
 
   if (!server.listen(port)) {
     GD_LOG_ERROR("listen on port {} failed", port);

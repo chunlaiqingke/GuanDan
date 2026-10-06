@@ -167,7 +167,9 @@ namespace guandan::net {
         if (s.wantWrite()) s.flush();
       }
 
-      sweepHeartbeats(util::nowMs());
+      const int64_t nowMs = util::nowMs();
+      sweepHeartbeats(nowMs);
+      if (onTick_) onTick_(nowMs);
       prune();
     }
   }

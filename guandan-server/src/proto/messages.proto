@@ -79,3 +79,77 @@ message ErrorMsg {
   int32 code = 1;
   string msg = 2;
 }
+
+// =====================================================================
+// Phase 03 对战流消息（单盘跑通）
+// =====================================================================
+
+// ---- 3005 C2S_SetHost：主动托管/取消托管 ----
+message SetHostReq {
+  bool host = 1;
+}
+
+// ---- 3001 S2C_TurnStart：轮到某人 ----
+message TurnStart {
+  int64 uid = 1;          // 当前操作人 playerId
+  int64 deadline_ts = 2;  // 截止时间（单调时钟 ms）
+  bool can_pass = 3;      // 是否可过（跟牌 true）
+}
+
+// ---- 3002 S2C_Tick：最后 5s 倒计时 ----
+message Tick {
+  int32 remain_ms = 1;
+}
+
+// ---- 3003 S2C_AutoPlay：超时/托管自动出牌 ----
+message AutoPlay {
+  int64 uid = 1;
+  repeated int32 cards = 2;
+  bool is_pass = 3;  // true 表示自动过牌
+}
+
+// ---- 3004 S2C_HostMode：托管状态 ----
+message HostMode {
+  int64 uid = 1;
+  bool is_host = 2;
+}
+
+// ---- 3006 C2S_Play：出牌 ----
+message PlayReq {
+  repeated int32 cards = 1;  // 牌编码 rank*4+suit
+}
+
+// ---- 3007 C2S_Pass：过牌 ----
+message PassReq {}
+
+// ---- 3008 S2C_Deal：发牌（发给本人） ----
+message Deal {
+  int32 level = 1;          // 当前级牌
+  int32 your_seat = 2;
+  repeated int32 cards = 3; // 本人手牌
+  repeated int64 seats = 4; // seat 顺序对应的 playerId
+}
+
+// ---- 3009 S2C_RoundEnd：一盘结束 ----
+message RoundEnd {
+  repeated int64 finish_order = 1;  // 头游→二游→三游 playerId
+  int32 level_up = 2;
+  int64 last_uid = 3;               // 末游
+}
+
+// ---- 3010 S2C_GameStart：开局广播 ----
+message GameStart {
+  int32 level = 1;
+  int64 first_uid = 2;  // 首出者
+}
+
+// ---- 3011 S2C_PlayResult：广播出牌 ----
+message PlayResultMsg {
+  int64 uid = 1;
+  repeated int32 cards = 2;
+}
+
+// ---- 3012 S2C_PassResult：广播过牌 ----
+message PassResultMsg {
+  int64 uid = 1;
+}

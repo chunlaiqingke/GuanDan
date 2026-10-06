@@ -1,6 +1,9 @@
 #include "proto/Dispatcher.h"
 
+#include <array>
+#include <cstdint>
 #include <string>
+#include <vector>
 
 #include "messages.pb.h"
 #include "net/Frame.h"
@@ -9,6 +12,20 @@
 #include "util/Time.h"
 
 namespace guandan::proto {
+
+  namespace {
+
+    constexpr int64_t kTurnTimeoutMs = 15000;
+    constexpr int64_t kTickWindowMs = 5000;  // 最后 5s 推 Tick
+
+    template <typename M>
+    std::string serialize(const M& m) {
+      std::string out;
+      m.SerializeToString(&out);
+      return out;
+    }
+
+  }  // namespace
 
   Dispatcher::Dispatcher(room::RoomManager& rooms) : rooms_(rooms) {}
 
@@ -33,21 +50,14 @@ namespace guandan::proto {
     const std::string body(reinterpret_cast<const char*>(data + net::kFrameHeaderSize), hdr.len);
 
     switch (static_cast<Cmd>(hdr.cmd)) {
-      case Cmd::C2S_Login:
-        handleLogin(s, body);
-        break;
-      case Cmd::C2S_CreateRoom:
-        handleCreateRoom(s, body);
-        break;
-      case Cmd::C2S_JoinRoom:
-        handleJoinRoom(s, body);
-        break;
-      case Cmd::C2S_Heartbeat:
-        handleHeartbeat(s, body);
-        break;
-      case Cmd::C2S_Reconnect:
-        handleReconnect(s, body);
-        break;
+      case Cmd::C2S_Login: handleLogin(s, body); break;
+      case Cmd::C2S_CreateRoom: handleCreateRoom(s, body); break;
+      case Cmd::C2S_JoinRoom: handleJoinRoom(s, body); break;
+      case Cmd::C2S_Heartbeat: handleHeartbeat(s, body); break;
+      case Cmd::C2S_Reconnect: handleReconnect(s, body); break;
+      case Cmd::C2S_Play: handlePlay(s, body); break;
+      case Cmd::C2S_Pass: handlePass(s, body); break;
+      case Cmd::C2S_SetHost: handleSetHost(s, body); break;
       default:
         GD_LOG_WARN("unknown cmd {}", hdr.cmd);
         sendError(s, 404, "unknown cmd");
@@ -57,16 +67,41 @@ namespace guandan::proto {
 
   void Dispatcher::onDisconnect(net::WsSession& s) {
     GD_LOG_INFO("disconnect playerId={} roomId={}", s.playerId(), s.roomId());
-    // Phase 01：不处理退房，后续 Phase 03 补齐。
+    auto it = sessions_.find(s.playerId());
+    if (it != sessions_.end() && it->second == &s) sessions_.erase(it);
+
+    // 断线进入托管态
+    if (!s.roomId().empty()) {
+      room::Room* room = rooms_.findMutable(s.roomId());
+      if (room && room->started) {
+        const int seat = room::seatOf(*room, s.playerId());
+        if (seat >= 0 && !room->hostMode[seat]) {
+          room->hostMode[seat] = true;
+          HostMode hm;
+          hm.set_uid(s.playerId());
+          hm.set_is_host(true);
+          broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_HostMode), serialize(hm));
+        }
+      }
+    }
   }
 
   void Dispatcher::sendError(net::WsSession& s, int code, const std::string& msg) {
     ErrorMsg err;
     err.set_code(code);
     err.set_msg(msg);
-    std::string body;
-    err.SerializeToString(&body);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_Error), body));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_Error), serialize(err)));
+  }
+
+  void Dispatcher::sendTo(int64_t playerId, uint16_t cmd, const std::string& body) {
+    auto it = sessions_.find(playerId);
+    if (it != sessions_.end()) {
+      it->second->sendBinary(net::encodeFrame(cmd, body));
+    }
+  }
+
+  void Dispatcher::broadcastRoom(const room::Room& room, uint16_t cmd, const std::string& body) {
+    for (const auto& p : room.players) sendTo(p.playerId, cmd, body);
   }
 
   void Dispatcher::handleLogin(net::WsSession& s, const std::string& body) {
@@ -77,13 +112,12 @@ namespace guandan::proto {
     }
     const int64_t playerId = nextPlayerId_++;
     s.setPlayerId(playerId);
+    sessions_[playerId] = &s;
     LoginAck ack;
     ack.set_code(0);
     ack.set_player_id(playerId);
     ack.set_msg("ok");
-    std::string out;
-    ack.SerializeToString(&out);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_LoginAck), out));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_LoginAck), serialize(ack)));
     GD_LOG_INFO("login uid={} -> playerId={}", req.uid(), playerId);
   }
 
@@ -95,13 +129,16 @@ namespace guandan::proto {
     }
     const std::string roomId = rooms_.createRoom(s.playerId());
     s.setRoomId(roomId);
+    rooms_.joinRoom(roomId, s.playerId());  // 房主自身入座 seat 0
+    if (room::Room* room = rooms_.findMutable(roomId)) {
+      const int lv = req.rule().level();
+      room->level = (lv >= 2 && lv <= 14) ? lv : 2;
+    }
     CreateRoomAck ack;
     ack.set_code(0);
     ack.set_room_id(roomId);
     ack.set_msg("ok");
-    std::string out;
-    ack.SerializeToString(&out);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_CreateRoomAck), out));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_CreateRoomAck), serialize(ack)));
     GD_LOG_INFO("create room {} by playerId={}", roomId, s.playerId());
   }
 
@@ -120,8 +157,7 @@ namespace guandan::proto {
     RoomState state;
     state.set_code(0);
     state.set_room_id(req.room_id());
-    const room::Room* room = rooms_.find(req.room_id());
-    if (room) {
+    if (const room::Room* room = rooms_.find(req.room_id())) {
       for (const auto& p : room->players) {
         auto* rp = state.add_players();
         rp->set_player_id(p.playerId);
@@ -129,10 +165,10 @@ namespace guandan::proto {
         rp->set_seat(p.seat);
       }
     }
-    std::string out;
-    state.SerializeToString(&out);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_RoomState), out));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_RoomState), serialize(state)));
     GD_LOG_INFO("join room {} playerId={}", req.room_id(), s.playerId());
+
+    maybeStartGame(req.room_id());
   }
 
   void Dispatcher::handleHeartbeat(net::WsSession& s, const std::string& body) {
@@ -144,9 +180,7 @@ namespace guandan::proto {
     s.markHeartbeat(util::nowMs());
     HeartbeatAck ack;
     ack.set_ts(req.ts());
-    std::string out;
-    ack.SerializeToString(&out);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_HeartbeatAck), out));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_HeartbeatAck), serialize(ack)));
   }
 
   void Dispatcher::handleReconnect(net::WsSession& s, const std::string& body) {
@@ -157,6 +191,7 @@ namespace guandan::proto {
     }
     s.setPlayerId(req.player_id());
     s.setRoomId(req.room_id());
+    sessions_[req.player_id()] = &s;
 
     RoomState state;
     state.set_code(0);
@@ -173,10 +208,249 @@ namespace guandan::proto {
       state.set_code(404);
       state.set_msg("room not found");
     }
-    std::string out;
-    state.SerializeToString(&out);
-    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_RoomState), out));
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_RoomState), serialize(state)));
     GD_LOG_INFO("reconnect playerId={} roomId={}", s.playerId(), s.roomId());
+
+    // 重连成功：补发手牌 + 当前回合
+    if (room && room->started) {
+      const int seat = room::seatOf(*room, req.player_id());
+      if (seat >= 0) {
+        Deal deal;
+        deal.set_level(room->table.level());
+        deal.set_your_seat(seat);
+        for (guandan::rules::Card c : room->table.hand(seat)) deal.add_cards(c);
+        for (const auto& p : room->players) deal.add_seats(p.playerId);
+        s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_Deal), serialize(deal)));
+
+        if (room->table.phase() == room::Phase::Playing) {
+          TurnStart ts;
+          ts.set_uid(room->table.playerId(room->table.currentTurn()));
+          ts.set_deadline_ts(room->deadlineMs);
+          ts.set_can_pass(room->table.canPass());
+          s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_TurnStart), serialize(ts)));
+        }
+      }
+    }
+  }
+
+  void Dispatcher::handlePlay(net::WsSession& s, const std::string& body) {
+    PlayReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse PlayReq failed");
+      return;
+    }
+    room::Room* room = rooms_.findMutable(s.roomId());
+    if (!room || !room->started) {
+      sendError(s, 404, "no active game");
+      return;
+    }
+    const int seat = room::seatOf(*room, s.playerId());
+    if (seat < 0) {
+      sendError(s, 403, "not in room");
+      return;
+    }
+    if (room->hostMode[seat]) {
+      sendError(s, 409, "in host mode");
+      return;
+    }
+    std::vector<guandan::rules::Card> cards;
+    for (int i = 0; i < req.cards_size(); ++i) cards.push_back(req.cards(i));
+
+    const room::PlayResult res = room->table.play(seat, cards);
+    if (res != room::PlayResult::Ok) {
+      sendError(s, errorCode(res), "play rejected");
+      return;
+    }
+
+    PlayResultMsg prm;
+    prm.set_uid(s.playerId());
+    for (guandan::rules::Card c : cards) prm.add_cards(c);
+    broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_PlayResult), serialize(prm));
+
+    if (room->table.phase() == room::Phase::RoundEnd) {
+      broadcastRoundEnd(*room);
+      room->deadlineMs = 0;
+      room->nextTickMs = 0;
+    } else {
+      beginTurn(*room);
+    }
+  }
+
+  void Dispatcher::handlePass(net::WsSession& s, const std::string& body) {
+    PassReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse PassReq failed");
+      return;
+    }
+    room::Room* room = rooms_.findMutable(s.roomId());
+    if (!room || !room->started) {
+      sendError(s, 404, "no active game");
+      return;
+    }
+    const int seat = room::seatOf(*room, s.playerId());
+    if (seat < 0) {
+      sendError(s, 403, "not in room");
+      return;
+    }
+    if (room->hostMode[seat]) {
+      sendError(s, 409, "in host mode");
+      return;
+    }
+    const room::PlayResult res = room->table.pass(seat);
+    if (res != room::PlayResult::Ok) {
+      sendError(s, errorCode(res), "pass rejected");
+      return;
+    }
+
+    PassResultMsg prm;
+    prm.set_uid(s.playerId());
+    broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_PassResult), serialize(prm));
+    beginTurn(*room);
+  }
+
+  void Dispatcher::handleSetHost(net::WsSession& s, const std::string& body) {
+    SetHostReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse SetHostReq failed");
+      return;
+    }
+    room::Room* room = rooms_.findMutable(s.roomId());
+    if (!room || !room->started) return;
+    const int seat = room::seatOf(*room, s.playerId());
+    if (seat < 0) return;
+    room->hostMode[seat] = req.host();
+
+    HostMode hm;
+    hm.set_uid(s.playerId());
+    hm.set_is_host(req.host());
+    broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_HostMode), serialize(hm));
+  }
+
+  void Dispatcher::maybeStartGame(const std::string& roomId) {
+    room::Room* room = rooms_.findMutable(roomId);
+    if (!room || room->started) return;
+    if (room->players.size() != static_cast<size_t>(room::RoomManager::kMaxPlayers)) return;
+
+    std::array<int64_t, 4> ids{};
+    for (int s = 0; s < 4; ++s) ids[s] = room->players[static_cast<size_t>(s)].playerId;
+    room->table.startRound(ids, room->level, static_cast<uint32_t>(util::nowMs() & 0xffffffffu));
+    room->started = true;
+
+    GameStart gs;
+    gs.set_level(room->level);
+    gs.set_first_uid(room->table.playerId(0));
+    broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_GameStart), serialize(gs));
+
+    for (int s = 0; s < 4; ++s) {
+      Deal deal;
+      deal.set_level(room->level);
+      deal.set_your_seat(s);
+      for (guandan::rules::Card c : room->table.hand(s)) deal.add_cards(c);
+      for (const auto& p : room->players) deal.add_seats(p.playerId);
+      sendTo(room->table.playerId(s), static_cast<uint16_t>(Cmd::S2C_Deal), serialize(deal));
+    }
+
+    beginTurn(*room);
+  }
+
+  void Dispatcher::beginTurn(room::Room& room) {
+    const int seat = room.table.currentTurn();
+    if (seat < 0 || room.table.phase() != room::Phase::Playing) return;
+    const int64_t now = util::nowMs();
+    room.deadlineMs = now + kTurnTimeoutMs;
+    room.nextTickMs = room.deadlineMs - kTickWindowMs;
+
+    TurnStart ts;
+    ts.set_uid(room.table.playerId(seat));
+    ts.set_deadline_ts(room.deadlineMs);
+    ts.set_can_pass(room.table.canPass());
+    broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_TurnStart), serialize(ts));
+  }
+
+  void Dispatcher::autoResolve(room::Room& room, int seat, int64_t nowMs) {
+    (void)nowMs;
+    const int64_t uid = room.table.playerId(seat);
+    if (room.table.canPass()) {
+      room.table.pass(seat);
+      AutoPlay ap;
+      ap.set_uid(uid);
+      ap.set_is_pass(true);
+      broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_AutoPlay), serialize(ap));
+      PassResultMsg prm;
+      prm.set_uid(uid);
+      broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_PassResult), serialize(prm));
+    } else {
+      const auto cards = room.table.minSingle(seat);
+      room.table.play(seat, cards);
+      AutoPlay ap;
+      ap.set_uid(uid);
+      ap.set_is_pass(false);
+      for (guandan::rules::Card c : cards) ap.add_cards(c);
+      broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_AutoPlay), serialize(ap));
+      PlayResultMsg prm;
+      prm.set_uid(uid);
+      for (guandan::rules::Card c : cards) prm.add_cards(c);
+      broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_PlayResult), serialize(prm));
+    }
+
+    if (room.table.phase() == room::Phase::RoundEnd) {
+      broadcastRoundEnd(room);
+      room.deadlineMs = 0;
+      room.nextTickMs = 0;
+    } else {
+      beginTurn(room);
+    }
+  }
+
+  void Dispatcher::broadcastRoundEnd(room::Room& room) {
+    RoundEnd re;
+    for (const auto& f : room.table.finishOrder()) {
+      re.add_finish_order(room.table.playerId(f.seat));
+    }
+    re.set_level_up(room.table.levelUp());
+    re.set_last_uid(room.table.playerId(room.table.lastSeat()));
+    broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_RoundEnd), serialize(re));
+  }
+
+  int Dispatcher::errorCode(room::PlayResult r) const {
+    switch (r) {
+      case room::PlayResult::NotYourTurn: return 403;
+      case room::PlayResult::InvalidCards:
+      case room::PlayResult::CardsNotInHand: return 400;
+      case room::PlayResult::CannotBeat:
+      case room::PlayResult::MustLead: return 409;
+      default: return 400;
+    }
+  }
+
+  void Dispatcher::onTick(int64_t nowMs) {
+    rooms_.forEachRoom([&](room::Room& room) {
+      if (!room.started || room.table.phase() != room::Phase::Playing) return;
+      const int seat = room.table.currentTurn();
+      if (seat < 0) return;
+
+      if (room.hostMode[seat]) {
+        autoResolve(room, seat, nowMs);
+        return;
+      }
+
+      if (room.deadlineMs > 0 && nowMs >= room.deadlineMs) {
+        ++room.timeoutCount[seat];
+        autoResolve(room, seat, nowMs);
+        return;
+      }
+
+      if (room.nextTickMs > 0 && nowMs >= room.nextTickMs && room.deadlineMs > nowMs) {
+        const int remain = static_cast<int>(room.deadlineMs - nowMs);
+        Tick tick;
+        tick.set_remain_ms(remain);
+        broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_Tick), serialize(tick));
+        room.nextTickMs = nowMs + 1000;
+      }
+    });
   }
 
 }  // namespace guandan::proto
+
+
+

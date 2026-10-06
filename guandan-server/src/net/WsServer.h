@@ -12,12 +12,13 @@
 namespace guandan::net {
 
   // 最小单线程 WS 服务端：poll 事件循环 + RFC6455 握手/帧收发。
-  // 抽象出 onBinary/onConnect/onDisconnect，便于日后无痛替换为 uWebSockets。
+  // 抽象出 onBinary/onConnect/onDisconnect/onTick，便于日后无痛替换为 uWebSockets。
   class WsServer {
    public:
     using BinaryCallback = std::function<void(WsSession&, const uint8_t*, size_t)>;
     using ConnectCallback = std::function<void(WsSession&)>;
     using DisconnectCallback = std::function<void(WsSession&)>;
+    using TickCallback = std::function<void(int64_t nowMs)>;
 
     WsServer();
     ~WsServer();
@@ -33,6 +34,7 @@ namespace guandan::net {
     void setOnBinary(BinaryCallback cb) { onBinary_ = std::move(cb); }
     void setOnConnect(ConnectCallback cb) { onConnect_ = std::move(cb); }
     void setOnDisconnect(DisconnectCallback cb) { onDisconnect_ = std::move(cb); }
+    void setOnTick(TickCallback cb) { onTick_ = std::move(cb); }
 
    private:
     void acceptPending();
@@ -49,6 +51,7 @@ namespace guandan::net {
     BinaryCallback onBinary_;
     ConnectCallback onConnect_;
     DisconnectCallback onDisconnect_;
+    TickCallback onTick_;
 
     static constexpr int64_t kHeartbeatIntervalMs = 5000;
     static constexpr int kMaxMissedHeartbeats = 3;

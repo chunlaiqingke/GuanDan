@@ -47,4 +47,13 @@ namespace guandan::room {
     return it == rooms_.end() ? nullptr : &it->second;
   }
 
+  Room* RoomManager::findMutable(const std::string& roomId) {
+    auto it = rooms_.find(roomId);
+    return it == rooms_.end() ? nullptr : &it->second;
+  }
+
+  void RoomManager::forEachRoom(const std::function<void(Room&)>& fn) {
+    for (auto& [id, room] : rooms_) fn(room);
+  }
+
 }  // namespace guandan::room
