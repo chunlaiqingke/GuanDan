@@ -1,1 +1,1 @@
-# 请看clinerules
+## 请看clinerules
