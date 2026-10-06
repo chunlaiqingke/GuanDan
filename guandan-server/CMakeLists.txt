@@ -52,6 +52,7 @@ file(GLOB_RECURSE CORE_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/util/*.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/room/*.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/proto/*.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/guandan/*.cpp
 )
 list(APPEND CORE_SRCS ${PROTO_SRCS})
 

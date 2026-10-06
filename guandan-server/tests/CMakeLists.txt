@@ -21,3 +21,8 @@ add_executable(test_ws_integration test_ws_integration.cpp)
 target_link_libraries(test_ws_integration PRIVATE guandan_core Threads::Threads)
 target_include_directories(test_ws_integration PRIVATE ${MINITEST_INCLUDE})
 add_test(NAME test_ws_integration COMMAND test_ws_integration)
+
+add_executable(test_guandan test_guandan.cpp)
+target_link_libraries(test_guandan PRIVATE guandan_core)
+target_include_directories(test_guandan PRIVATE ${MINITEST_INCLUDE})
+add_test(NAME test_guandan COMMAND test_guandan)
