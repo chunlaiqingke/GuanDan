@@ -21,6 +21,9 @@ export const Cmd = {
   S2C_GameStart: 3010,
   S2C_PlayResult: 3011,
   S2C_PassResult: 3012,
+  C2S_AddBot: 3013,
+  C2S_Hint: 3014,
+  S2C_HintAck: 3015,
 
   C2S_Heartbeat: 9001,
   S2C_HeartbeatAck: 9002,

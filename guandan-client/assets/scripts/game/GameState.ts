@@ -5,8 +5,10 @@ import {
   AutoPlay,
   Deal,
   GameStart,
+  HintAck,
   HostMode,
   PlayResultMsg,
+  RoomState,
   RoundEnd,
   Tick,
   TurnStart,
@@ -31,6 +33,8 @@ export class GameState {
   finishOrder: number[] = [];
   levelUp = 0;
   lastUid = 0;
+  hint: number[][] = [];
+  botUids = new Set<number>();
 
   applyGameStart(m: GameStart): void {
     this.level = m.level;
@@ -93,6 +97,21 @@ export class GameState {
       const seat = this.seatOf(uid);
       if (seat >= 0) this.seats[seat].isOut = true;
     }
+  }
+
+  applyRoomState(m: RoomState): void {
+    for (const p of m.players) {
+      if (p.isBot) this.botUids.add(p.playerId);
+      else this.botUids.delete(p.playerId);
+    }
+  }
+
+  applyHintAck(m: HintAck): void {
+    this.hint = m.plays.map((cards) => cards.slice());
+  }
+
+  isBot(uid: number): boolean {
+    return this.botUids.has(uid);
   }
 
   seatOf(uid: number): number {

@@ -39,6 +39,7 @@ export interface RoomPlayer {
   playerId: number;
   name: string;
   seat: number;
+  isBot: boolean;
 }
 
 export interface RoomState {
@@ -135,13 +136,14 @@ export function decodeCreateRoomAck(b: Uint8Array): CreateRoomAck {
 
 function decodeRoomPlayer(b: Uint8Array): RoomPlayer {
   const r = new Reader(b);
-  const out: RoomPlayer = { playerId: 0, name: '', seat: 0 };
+  const out: RoomPlayer = { playerId: 0, name: '', seat: 0, isBot: false };
   let tag: [number, number] | null;
   while ((tag = r.readTag()) !== null) {
     const [fieldNo, wt] = tag;
     if (fieldNo === 1) out.playerId = r.readVarint();
     else if (fieldNo === 2) out.name = r.readString();
     else if (fieldNo === 3) out.seat = r.readVarint();
+    else if (fieldNo === 4) out.isBot = r.readVarint() !== 0;
     else r.skip(wt);
   }
   return out;
@@ -390,6 +392,54 @@ export function decodePassResult(b: Uint8Array): PassResultMsg {
   while ((tag = r.readTag()) !== null) {
     const [fieldNo, wt] = tag;
     if (fieldNo === 1) out.uid = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+// =====================================================================
+// Phase 04：AI Bot 补位 + 提示出牌
+// =====================================================================
+
+export interface AddBotReq {
+  count: number;
+}
+
+export interface HintAck {
+  code: number;
+  plays: number[][]; // 每个元素是一手牌的 cards
+}
+
+export function encodeAddBotReq(m: AddBotReq): Uint8Array {
+  const w = new Writer();
+  w.writeInt32(1, m.count);
+  return w.finish();
+}
+
+export function encodeHintReq(): Uint8Array {
+  return new Writer().finish();
+}
+
+function decodeHintPlay(b: Uint8Array): number[] {
+  const r = new Reader(b);
+  const cards: number[] = [];
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) cards.push(...readPackedVarints(r.readBytes()));
+    else r.skip(wt);
+  }
+  return cards;
+}
+
+export function decodeHintAck(b: Uint8Array): HintAck {
+  const r = new Reader(b);
+  const out: HintAck = { code: 0, plays: [] };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.code = r.readVarint();
+    else if (fieldNo === 2) out.plays.push(decodeHintPlay(r.readBytes()));
     else r.skip(wt);
   }
   return out;
