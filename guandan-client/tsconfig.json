@@ -12,5 +12,6 @@
     "forceConsistentCasingInFileNames": true,
     "noImplicitAny": true
   },
-  "include": ["assets/scripts/**/*.ts"]
+  "include": ["assets/scripts/**/*.ts"],
+  "exclude": ["assets/scripts/ui/Bootstrap.ts"]
 }

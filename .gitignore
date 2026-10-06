@@ -70,3 +70,5 @@ run.sh.bak
 guandan-server/**/test_* 
 !guandan-server/**/test_*.cpp
 !guandan-server/**/test_*.h
+
+*.meta

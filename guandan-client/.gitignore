@@ -1,0 +1,7 @@
+# Cocos Creator 生成的临时/缓存目录（提交时忽略）
+library/
+temp/
+local/
+build/
+profiles/
+native/
