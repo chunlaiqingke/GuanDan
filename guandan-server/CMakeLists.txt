@@ -21,6 +21,10 @@ if(NOT PROTOBUF_INCLUDE_DIR OR NOT PROTOBUF_LIBRARY)
   message(FATAL_ERROR "protobuf not found (expected under /opt/anaconda3)")
 endif()
 
+# ---- sqlite3（段位持久化）----
+find_path(SQLITE3_INCLUDE_DIR sqlite3.h HINTS /opt/anaconda3/include /usr/local/include /usr/include)
+find_library(SQLITE3_LIBRARY sqlite3 HINTS /opt/anaconda3/lib /usr/local/lib /usr/lib)
+
 # ---- spdlog（可选；缺失则退回内置极简日志，见 util/Log.h）----
 find_path(SPDLOG_INCLUDE_DIR spdlog/spdlog.h HINTS /usr/local/include)
 
@@ -53,6 +57,7 @@ file(GLOB_RECURSE CORE_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/src/room/*.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/proto/*.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/src/guandan/*.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/src/rank/*.cpp
 )
 list(APPEND CORE_SRCS ${PROTO_SRCS})
 
@@ -62,11 +67,12 @@ target_include_directories(guandan_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${PROTO_GEN_DIR}
   ${PROTOBUF_INCLUDE_DIR}
+  ${SQLITE3_INCLUDE_DIR}
 )
 if(SPDLOG_INCLUDE_DIR)
   target_include_directories(guandan_core PUBLIC ${SPDLOG_INCLUDE_DIR})
 endif()
-target_link_libraries(guandan_core PUBLIC ${PROTOBUF_LIBRARY})
+target_link_libraries(guandan_core PUBLIC ${PROTOBUF_LIBRARY} ${SQLITE3_LIBRARY})
 
 # ---- 服务端可执行 ----
 add_executable(guandan_server src/main.cpp)
@@ -75,3 +81,12 @@ target_link_libraries(guandan_server PRIVATE guandan_core)
 # ---- 测试 ----
 enable_testing()
 add_subdirectory(tests)
+
+# ---- 打包（CPack）----
+install(TARGETS guandan_server RUNTIME DESTINATION bin)
+
+set(CPACK_PACKAGE_NAME "guandan-server")
+set(CPACK_PACKAGE_VERSION "0.1.0")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Guandan (掼蛋) 4-player card game server")
+set(CPACK_GENERATOR "TGZ")
+include(CPack)

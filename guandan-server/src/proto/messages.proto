@@ -106,7 +106,8 @@ message Tick {
 message AutoPlay {
   int64 uid = 1;
   repeated int32 cards = 2;
-  bool is_pass = 3;  // true 表示自动过牌
+  bool is_pass = 3;    // true 表示自动过牌
+  int32 reason_tag = 4; // 出牌理由标签（见 03-ai-design）
 }
 
 // ---- 3004 S2C_HostMode：托管状态 ----
@@ -166,8 +167,34 @@ message HintReq {}
 // ---- 3015 S2C_HintAck：Top3 推荐 ----
 message HintPlay {
   repeated int32 cards = 1;
+  int32 reason_tag = 2;  // 推荐理由标签
 }
 message HintAck {
   int32 code = 1;
   repeated HintPlay plays = 2;
+}
+
+// ---- 3016 C2S_StartMatch：开始匹配 ----
+message StartMatchReq {}
+
+// ---- 3017 C2S_CancelMatch：取消匹配 ----
+message CancelMatchReq {}
+
+// ---- 3018 S2C_MatchAck：匹配成功 ----
+message MatchAck {
+  int32 code = 1;
+  string room_id = 2;
+  int32 level = 3;
+}
+
+// ---- 3019 S2C_RankUpdate：段位结算 ----
+message RankInfo {
+  int64 player_id = 1;
+  int32 old_rating = 2;
+  int32 new_rating = 3;
+  int32 delta = 4;
+  string tier = 5;
+}
+message RankUpdate {
+  repeated RankInfo updates = 1;
 }

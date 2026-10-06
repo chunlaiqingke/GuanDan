@@ -101,8 +101,8 @@ namespace guandan::ai {
     return d;
   }
 
-  std::vector<Play> hint(const std::vector<Card>& hand, int levelRank,
-                         const rules::PatternInfo* lastPlay) {
+  std::vector<HintEntry> hintTagged(const std::vector<Card>& hand, int levelRank,
+                                    const rules::PatternInfo* lastPlay) {
     auto plays = generatePlays(hand, levelRank);
     if (lastPlay) {
       plays.erase(std::remove_if(plays.begin(), plays.end(),
@@ -125,7 +125,26 @@ namespace guandan::ai {
       return a.cards.size() < b.cards.size();
     });
     if (plays.size() > 3) plays.resize(3);
-    return plays;
+
+    std::vector<HintEntry> out;
+    for (auto& p : plays) {
+      ReasonTag tag;
+      if (p.cards.size() == hand.size()) tag = ReasonTag::GoOut;
+      else if (lastPlay == nullptr) tag = ReasonTag::None;
+      else if (rules::isBombLevel(p.pattern.type) && !rules::isBombLevel(lastPlay->type)) tag = ReasonTag::BlockOpp;
+      else tag = ReasonTag::MinBeat;
+      out.push_back({std::move(p), tag});
+    }
+    return out;
+  }
+
+  std::vector<Play> hint(const std::vector<Card>& hand, int levelRank,
+                         const rules::PatternInfo* lastPlay) {
+    auto tagged = hintTagged(hand, levelRank, lastPlay);
+    std::vector<Play> out;
+    out.reserve(tagged.size());
+    for (auto& t : tagged) out.push_back(std::move(t.play));
+    return out;
   }
 
 }  // namespace guandan::ai

@@ -6,8 +6,12 @@ import {
   Deal,
   GameStart,
   HintAck,
+  HintPlay,
   HostMode,
+  MatchAck,
   PlayResultMsg,
+  RankInfo,
+  RankUpdate,
   RoomState,
   RoundEnd,
   Tick,
@@ -33,8 +37,11 @@ export class GameState {
   finishOrder: number[] = [];
   levelUp = 0;
   lastUid = 0;
-  hint: number[][] = [];
+  hint: HintPlay[] = [];
+  lastReasonTag = 0;
   botUids = new Set<number>();
+  rankUpdates: RankInfo[] = [];
+  matchAck: MatchAck | null = null;
 
   applyGameStart(m: GameStart): void {
     this.level = m.level;
@@ -80,6 +87,7 @@ export class GameState {
   }
 
   applyAutoPlay(m: AutoPlay): void {
+    this.lastReasonTag = m.reasonTag;
     if (m.isPass) this.applyPassResult({ uid: m.uid });
     else this.applyPlayResult({ uid: m.uid, cards: m.cards });
   }
@@ -107,7 +115,16 @@ export class GameState {
   }
 
   applyHintAck(m: HintAck): void {
-    this.hint = m.plays.map((cards) => cards.slice());
+    this.hint = m.plays.map((p) => ({ cards: p.cards.slice(), reasonTag: p.reasonTag }));
+    this.lastReasonTag = this.hint.length > 0 ? this.hint[0].reasonTag : 0;
+  }
+
+  applyMatchAck(m: MatchAck): void {
+    this.matchAck = m;
+  }
+
+  applyRankUpdate(m: RankUpdate): void {
+    this.rankUpdates = m.updates.map((u) => ({ ...u }));
   }
 
   isBot(uid: number): boolean {

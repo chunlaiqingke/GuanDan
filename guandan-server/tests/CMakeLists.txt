@@ -41,3 +41,8 @@ add_executable(test_ai test_ai.cpp)
 target_link_libraries(test_ai PRIVATE guandan_core)
 target_include_directories(test_ai PRIVATE ${MINITEST_INCLUDE})
 add_test(NAME test_ai COMMAND test_ai)
+
+add_executable(test_rank test_rank.cpp)
+target_link_libraries(test_rank PRIVATE guandan_core)
+target_include_directories(test_rank PRIVATE ${MINITEST_INCLUDE})
+add_test(NAME test_rank COMMAND test_rank)

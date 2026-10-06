@@ -271,6 +271,7 @@ TEST(GameFlowFullRound) {
 TEST(GameFlowWithBots) {
   room::RoomManager rooms;
   proto::Dispatcher dispatcher(rooms);
+  dispatcher.openRatings(":memory:");
   net::WsServer server;
   server.setOnBinary([&](net::WsSession& s, const uint8_t* d, size_t n) { dispatcher.onBinary(s, d, n); });
   server.setOnDisconnect([&](net::WsSession& s) { dispatcher.onDisconnect(s); });
@@ -317,17 +318,83 @@ TEST(GameFlowWithBots) {
 
     // 等待一盘结束（RoundEnd）
     bool roundEnded = false;
+    bool rankSeen = false;
     for (int i = 0; i < 5000 && !roundEnded; ++i) {
       std::vector<uint8_t> f;
       while (recvFrameTimeout(fd, 2, f)) {
         net::FrameHeader hdr;
         if (!net::decodeHeader(f.data(), f.size(), hdr)) continue;
         if (hdr.cmd == 3009) roundEnded = true;
+        if (hdr.cmd == 3019) rankSeen = true;
       }
     }
 
     EXPECT_TRUE(roundEnded);
+    EXPECT_TRUE(rankSeen);
     ::close(fd);
+  } catch (const std::exception& e) {
+    ::minitest::reportFailure(std::string("exception: ") + e.what(), __FILE__, __LINE__);
+  }
+
+  server.stop();
+  th.join();
+}
+
+TEST(GameFlowMatchmaking) {
+  room::RoomManager rooms;
+  proto::Dispatcher dispatcher(rooms);
+  dispatcher.openRatings(":memory:");
+  net::WsServer server;
+  server.setOnBinary([&](net::WsSession& s, const uint8_t* d, size_t n) { dispatcher.onBinary(s, d, n); });
+  server.setOnDisconnect([&](net::WsSession& s) { dispatcher.onDisconnect(s); });
+  server.setOnTick([&](int64_t t) { dispatcher.onTick(t); });
+
+  if (!server.listen(0)) {
+    ::minitest::reportFailure("listen(0) failed", __FILE__, __LINE__);
+    return;
+  }
+  const uint16_t port = server.port();
+  std::thread th([&]() { server.run(); });
+
+  try {
+    int fd[4] = {-1, -1, -1, -1};
+    for (int i = 0; i < 4; ++i) {
+      fd[i] = connectTcp(port);
+      doHandshake(fd[i]);
+      LoginReq login;
+      login.set_uid("m" + std::to_string(i));
+      login.set_token("t");
+      sendMaskedFrame(fd[i], net::encodeFrame(1001, serialize(login)));
+      recvFrame(fd[i]);  // LoginAck
+    }
+
+    StartMatchReq sm;
+    for (int i = 0; i < 4; ++i) sendMaskedFrame(fd[i], net::encodeFrame(3016, serialize(sm)));
+
+    bool matched[4] = {false, false, false, false};
+    bool dealt[4] = {false, false, false, false};
+    for (int step = 0; step < 2000; ++step) {
+      for (int i = 0; i < 4; ++i) {
+        std::vector<uint8_t> f;
+        while (recvFrameTimeout(fd[i], 2, f)) {
+          net::FrameHeader hdr;
+          if (!net::decodeHeader(f.data(), f.size(), hdr)) continue;
+          if (hdr.cmd == 3018) matched[i] = true;
+          if (hdr.cmd == 3008) dealt[i] = true;
+        }
+      }
+      bool done = true;
+      for (int i = 0; i < 4; ++i) {
+        if (!matched[i] || !dealt[i]) done = false;
+      }
+      if (done) break;
+    }
+
+    for (int i = 0; i < 4; ++i) {
+      EXPECT_TRUE(matched[i]);
+      EXPECT_TRUE(dealt[i]);
+    }
+    for (int i = 0; i < 4; ++i) ::close(fd[i]);
   } catch (const std::exception& e) {
     ::minitest::reportFailure(std::string("exception: ") + e.what(), __FILE__, __LINE__);
   }

@@ -33,6 +33,12 @@ namespace guandan::ai {
     ReasonTag tag = ReasonTag::None;
   };
 
+  // 提示项：一手候选 + 理由标签。
+  struct HintEntry {
+    Play play;
+    ReasonTag tag;
+  };
+
   // 决策：lastPlay=nullptr 表示领出。
   Decision decide(const std::vector<Card>& hand, int levelRank,
                   const rules::PatternInfo* lastPlay, const PlayContext& ctx,
@@ -41,5 +47,9 @@ namespace guandan::ai {
   // 提示：返回 Top3 候选（已按策略偏好排序）。lastPlay=nullptr 表示领出。
   std::vector<Play> hint(const std::vector<Card>& hand, int levelRank,
                          const rules::PatternInfo* lastPlay);
+
+  // 提示（含理由标签）。
+  std::vector<HintEntry> hintTagged(const std::vector<Card>& hand, int levelRank,
+                                    const rules::PatternInfo* lastPlay);
 
 }  // namespace guandan::ai

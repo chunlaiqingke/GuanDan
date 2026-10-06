@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
 
   guandan::room::RoomManager rooms;
   guandan::proto::Dispatcher dispatcher(rooms);
+  dispatcher.openRatings(argc > 2 ? argv[2] : "guandan.db");
   guandan::net::WsServer server;
   server.setOnBinary(
       [&](guandan::net::WsSession& s, const uint8_t* d, size_t n) { dispatcher.onBinary(s, d, n); });

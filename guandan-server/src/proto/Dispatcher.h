@@ -4,9 +4,12 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "net/WsSession.h"
+#include "rank/Rating.h"
+#include "rank/RatingStore.h"
 #include "room/RoomManager.h"
 
 namespace guandan::proto {
@@ -20,8 +23,10 @@ namespace guandan::proto {
     // 处理一条完整业务帧（即 WS 二进制 payload）。
     void onBinary(net::WsSession& s, const uint8_t* data, size_t len);
     void onDisconnect(net::WsSession& s);
-    // 定时 tick（由 WsServer 事件循环驱动）：倒计时/超时自动/托管代出。
+    // 定时 tick（由 WsServer 事件循环驱动）：倒计时/超时自动/托管代出/匹配。
     void onTick(int64_t nowMs);
+    // 打开段位数据库（可选；未打开则跳过段位结算）。
+    void openRatings(const std::string& path) { ratingsOpen_ = ratings_.open(path); }
 
    private:
     void sendError(net::WsSession& s, int code, const std::string& msg);
@@ -38,13 +43,17 @@ namespace guandan::proto {
     void handleSetHost(net::WsSession& s, const std::string& body);
     void handleAddBot(net::WsSession& s, const std::string& body);
     void handleHint(net::WsSession& s, const std::string& body);
+    void handleStartMatch(net::WsSession& s, const std::string& body);
+    void handleCancelMatch(net::WsSession& s, const std::string& body);
 
     void maybeStartGame(const std::string& roomId);
+    void matchTick(int64_t nowMs);
     void beginTurn(room::Room& room);
     void autoResolve(room::Room& room, int seat, int64_t nowMs);
     void botResolve(room::Room& room, int seat);
     void broadcastAction(room::Room& room, int64_t uid,
-                         const std::vector<guandan::rules::Card>& cards, bool pass);
+                         const std::vector<guandan::rules::Card>& cards, bool pass,
+                         int reasonTag = 0);
     void afterAction(room::Room& room);
     void broadcastRoundEnd(room::Room& room);
     bool isBotSeat(const room::Room& room, int seat) const;
@@ -54,6 +63,9 @@ namespace guandan::proto {
     std::unordered_map<int64_t, net::WsSession*> sessions_;
     int64_t nextPlayerId_ = 1;
     int64_t nextBotId_ = -1;
+    rank::RatingStore ratings_;
+    bool ratingsOpen_ = false;
+    std::vector<std::pair<int64_t, int64_t>> matchQueue_;  // (playerId, 入队时间 ms)
   };
 
 }  // namespace guandan::proto

@@ -24,6 +24,10 @@ export const Cmd = {
   C2S_AddBot: 3013,
   C2S_Hint: 3014,
   S2C_HintAck: 3015,
+  C2S_StartMatch: 3016,
+  C2S_CancelMatch: 3017,
+  S2C_MatchAck: 3018,
+  S2C_RankUpdate: 3019,
 
   C2S_Heartbeat: 9001,
   S2C_HeartbeatAck: 9002,

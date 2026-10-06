@@ -127,4 +127,21 @@ TEST(HintTop3) {
   EXPECT_EQ(h[0].pattern.mainRank, 3);
 }
 
+TEST(HintTaggedTags) {
+  // 跟牌：上一手单张 5，手牌 4、9 → Top1 最小压 9，标签 MinBeat
+  PatternInfo last;
+  last.type = PatternType::Single;
+  last.mainRank = 5;
+  last.length = 1;
+  auto entries = hintTagged({S(4), S(9)}, 2, &last);
+  EXPECT_TRUE(entries.size() >= 1);
+  EXPECT_TRUE(entries[0].tag == ReasonTag::MinBeat);
+  EXPECT_EQ(entries[0].play.pattern.mainRank, 9);
+
+  // 领出：无上一手 → 标签 None
+  auto lead = hintTagged({S(4), S(9)}, 2, nullptr);
+  EXPECT_TRUE(lead.size() >= 1);
+  EXPECT_TRUE(lead[0].tag == ReasonTag::None);
+}
+
 MINITEST_MAIN()

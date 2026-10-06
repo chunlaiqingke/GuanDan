@@ -211,6 +211,7 @@ export interface AutoPlay {
   uid: number;
   cards: number[];
   isPass: boolean;
+  reasonTag: number;
 }
 
 export interface HostMode {
@@ -305,13 +306,14 @@ export function decodeTick(b: Uint8Array): Tick {
 
 export function decodeAutoPlay(b: Uint8Array): AutoPlay {
   const r = new Reader(b);
-  const out: AutoPlay = { uid: 0, cards: [], isPass: false };
+  const out: AutoPlay = { uid: 0, cards: [], isPass: false, reasonTag: 0 };
   let tag: [number, number] | null;
   while ((tag = r.readTag()) !== null) {
     const [fieldNo, wt] = tag;
     if (fieldNo === 1) out.uid = r.readVarint();
     else if (fieldNo === 2) out.cards.push(...readPackedVarints(r.readBytes()));
     else if (fieldNo === 3) out.isPass = r.readVarint() !== 0;
+    else if (fieldNo === 4) out.reasonTag = r.readVarint();
     else r.skip(wt);
   }
   return out;
@@ -405,9 +407,14 @@ export interface AddBotReq {
   count: number;
 }
 
+export interface HintPlay {
+  cards: number[];
+  reasonTag: number;
+}
+
 export interface HintAck {
   code: number;
-  plays: number[][]; // 每个元素是一手牌的 cards
+  plays: HintPlay[];
 }
 
 export function encodeAddBotReq(m: AddBotReq): Uint8Array {
@@ -420,16 +427,17 @@ export function encodeHintReq(): Uint8Array {
   return new Writer().finish();
 }
 
-function decodeHintPlay(b: Uint8Array): number[] {
+function decodeHintPlay(b: Uint8Array): HintPlay {
   const r = new Reader(b);
-  const cards: number[] = [];
+  const out: HintPlay = { cards: [], reasonTag: 0 };
   let tag: [number, number] | null;
   while ((tag = r.readTag()) !== null) {
     const [fieldNo, wt] = tag;
-    if (fieldNo === 1) cards.push(...readPackedVarints(r.readBytes()));
+    if (fieldNo === 1) out.cards.push(...readPackedVarints(r.readBytes()));
+    else if (fieldNo === 2) out.reasonTag = r.readVarint();
     else r.skip(wt);
   }
-  return cards;
+  return out;
 }
 
 export function decodeHintAck(b: Uint8Array): HintAck {
@@ -440,6 +448,79 @@ export function decodeHintAck(b: Uint8Array): HintAck {
     const [fieldNo, wt] = tag;
     if (fieldNo === 1) out.code = r.readVarint();
     else if (fieldNo === 2) out.plays.push(decodeHintPlay(r.readBytes()));
+    else r.skip(wt);
+  }
+  return out;
+}
+
+// =====================================================================
+// Phase 07：匹配 + 段位
+// =====================================================================
+
+export interface MatchAck {
+  code: number;
+  roomId: string;
+  level: number;
+}
+
+export interface RankInfo {
+  playerId: number;
+  oldRating: number;
+  newRating: number;
+  delta: number; // 由 new-old 计算（负 int32 在 JS 端不直接解码）
+  tier: string;
+}
+
+export interface RankUpdate {
+  updates: RankInfo[];
+}
+
+export function encodeStartMatchReq(): Uint8Array {
+  return new Writer().finish();
+}
+
+export function encodeCancelMatchReq(): Uint8Array {
+  return new Writer().finish();
+}
+
+export function decodeMatchAck(b: Uint8Array): MatchAck {
+  const r = new Reader(b);
+  const out: MatchAck = { code: 0, roomId: '', level: 0 };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.code = r.readVarint();
+    else if (fieldNo === 2) out.roomId = r.readString();
+    else if (fieldNo === 3) out.level = r.readVarint();
+    else r.skip(wt);
+  }
+  return out;
+}
+
+function decodeRankInfo(b: Uint8Array): RankInfo {
+  const r = new Reader(b);
+  const out: RankInfo = { playerId: 0, oldRating: 0, newRating: 0, delta: 0, tier: '' };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.playerId = r.readVarint();
+    else if (fieldNo === 2) out.oldRating = r.readVarint();
+    else if (fieldNo === 3) out.newRating = r.readVarint();
+    else if (fieldNo === 4) r.skip(wt); // delta 忽略，由 new-old 计算
+    else if (fieldNo === 5) out.tier = r.readString();
+    else r.skip(wt);
+  }
+  out.delta = out.newRating - out.oldRating;
+  return out;
+}
+
+export function decodeRankUpdate(b: Uint8Array): RankUpdate {
+  const r = new Reader(b);
+  const out: RankUpdate = { updates: [] };
+  let tag: [number, number] | null;
+  while ((tag = r.readTag()) !== null) {
+    const [fieldNo, wt] = tag;
+    if (fieldNo === 1) out.updates.push(decodeRankInfo(r.readBytes()));
     else r.skip(wt);
   }
   return out;

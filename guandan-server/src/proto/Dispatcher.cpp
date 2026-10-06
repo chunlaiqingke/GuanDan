@@ -62,6 +62,8 @@ namespace guandan::proto {
       case Cmd::C2S_SetHost: handleSetHost(s, body); break;
       case Cmd::C2S_AddBot: handleAddBot(s, body); break;
       case Cmd::C2S_Hint: handleHint(s, body); break;
+      case Cmd::C2S_StartMatch: handleStartMatch(s, body); break;
+      case Cmd::C2S_CancelMatch: handleCancelMatch(s, body); break;
       default:
         GD_LOG_WARN("unknown cmd {}", hdr.cmd);
         sendError(s, 404, "unknown cmd");
@@ -73,6 +75,12 @@ namespace guandan::proto {
     GD_LOG_INFO("disconnect playerId={} roomId={}", s.playerId(), s.roomId());
     auto it = sessions_.find(s.playerId());
     if (it != sessions_.end() && it->second == &s) sessions_.erase(it);
+
+    // 退出匹配队列
+    matchQueue_.erase(
+        std::remove_if(matchQueue_.begin(), matchQueue_.end(),
+                       [&](const auto& p) { return p.first == s.playerId(); }),
+        matchQueue_.end());
 
     // 断线进入托管态
     if (!s.roomId().empty()) {
@@ -374,10 +382,12 @@ namespace guandan::proto {
   }
 
   void Dispatcher::broadcastAction(room::Room& room, int64_t uid,
-                                   const std::vector<guandan::rules::Card>& cards, bool pass) {
+                                   const std::vector<guandan::rules::Card>& cards, bool pass,
+                                   int reasonTag) {
     AutoPlay ap;
     ap.set_uid(uid);
     ap.set_is_pass(pass);
+    ap.set_reason_tag(reasonTag);
     if (pass) {
       broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_AutoPlay), serialize(ap));
       PassResultMsg prm;
@@ -417,6 +427,71 @@ namespace guandan::proto {
     afterAction(room);
   }
 
+  void Dispatcher::handleStartMatch(net::WsSession& s, const std::string& body) {
+    StartMatchReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse StartMatchReq failed");
+      return;
+    }
+    if (!s.roomId().empty()) {
+      sendError(s, 409, "already in room");
+      return;
+    }
+    for (const auto& p : matchQueue_) {
+      if (p.first == s.playerId()) return;  // 已在队列
+    }
+    matchQueue_.push_back({s.playerId(), util::nowMs()});
+    GD_LOG_INFO("playerId={} start match, queue={}", s.playerId(), matchQueue_.size());
+  }
+
+  void Dispatcher::handleCancelMatch(net::WsSession& s, const std::string& body) {
+    CancelMatchReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse CancelMatchReq failed");
+      return;
+    }
+    matchQueue_.erase(
+        std::remove_if(matchQueue_.begin(), matchQueue_.end(),
+                       [&](const auto& p) { return p.first == s.playerId(); }),
+        matchQueue_.end());
+  }
+
+  void Dispatcher::matchTick(int64_t nowMs) {
+    constexpr int64_t kMatchTimeoutMs = 30000;
+    std::vector<int64_t> players;
+    if (matchQueue_.size() >= 4) {
+      for (int i = 0; i < 4; ++i) players.push_back(matchQueue_[static_cast<size_t>(i)].first);
+      matchQueue_.erase(matchQueue_.begin(), matchQueue_.begin() + 4);
+    } else if (!matchQueue_.empty() && nowMs - matchQueue_.front().second > kMatchTimeoutMs) {
+      for (const auto& p : matchQueue_) players.push_back(p.first);
+      matchQueue_.clear();
+    }
+    if (players.empty()) return;
+
+    const std::string roomId = rooms_.createRoom(players[0]);
+    for (int64_t pid : players) {
+      rooms_.joinRoom(roomId, pid);
+      auto it = sessions_.find(pid);
+      if (it != sessions_.end()) it->second->setRoomId(roomId);
+    }
+    while (true) {
+      room::Room* room = rooms_.findMutable(roomId);
+      if (!room || room->players.size() >= static_cast<size_t>(room::RoomManager::kMaxPlayers)) break;
+      rooms_.addBot(roomId, nextBotId_);
+      --nextBotId_;
+    }
+
+    for (int64_t pid : players) {
+      MatchAck ack;
+      ack.set_code(0);
+      ack.set_room_id(roomId);
+      ack.set_level(2);
+      sendTo(pid, static_cast<uint16_t>(Cmd::S2C_MatchAck), serialize(ack));
+    }
+
+    maybeStartGame(roomId);
+  }
+
   bool Dispatcher::isBotSeat(const room::Room& room, int seat) const {
     return seat >= 0 && seat < static_cast<int>(room.players.size()) && room.players[seat].isBot;
   }
@@ -443,14 +518,14 @@ namespace guandan::proto {
     if (d.pass) {
       if (room.table.canPass()) {
         room.table.pass(seat);
-        broadcastAction(room, uid, {}, true);
+        broadcastAction(room, uid, {}, true, static_cast<int>(d.tag));
       } else {
         const auto safe = room.table.minSingle(seat);
         room.table.play(seat, safe);
         broadcastAction(room, uid, safe, false);
       }
     } else if (room.table.play(seat, d.cards) == room::PlayResult::Ok) {
-      broadcastAction(room, uid, d.cards, false);
+      broadcastAction(room, uid, d.cards, false, static_cast<int>(d.tag));
     } else if (room.table.canPass()) {
       // 决策与规则引擎罕见不一致：兜底过牌
       room.table.pass(seat);
@@ -517,13 +592,14 @@ namespace guandan::proto {
     }
     const int level = room->table.level();
     const rules::PatternInfo* last = room->table.canPass() ? &room->table.lastPlay() : nullptr;
-    const auto plays = ai::hint(room->table.hand(seat), level, last);
+    const auto entries = ai::hintTagged(room->table.hand(seat), level, last);
 
     HintAck ack;
     ack.set_code(0);
-    for (const auto& p : plays) {
+    for (const auto& e : entries) {
       auto* hp = ack.add_plays();
-      for (guandan::rules::Card c : p.cards) hp->add_cards(c);
+      for (guandan::rules::Card c : e.play.cards) hp->add_cards(c);
+      hp->set_reason_tag(static_cast<int>(e.tag));
     }
     s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_HintAck), serialize(ack)));
   }
@@ -536,6 +612,36 @@ namespace guandan::proto {
     re.set_level_up(room.table.levelUp());
     re.set_last_uid(room.table.playerId(room.table.lastSeat()));
     broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_RoundEnd), serialize(re));
+
+    // 段位结算
+    if (ratingsOpen_) {
+      const int headSeat = room.table.headSeat();
+      std::pair<int64_t, int> a1, a2, b1, b2;
+      int ai = 0, bi = 0;
+      for (int s = 0; s < 4; ++s) {
+        const int64_t pid = room.table.playerId(s);
+        const int r = ratings_.getRating(pid);
+        if ((s & 1) == 0) {
+          if (ai++ == 0) a1 = {pid, r}; else a2 = {pid, r};
+        } else {
+          if (bi++ == 0) b1 = {pid, r}; else b2 = {pid, r};
+        }
+      }
+      const bool evenTeamWins = (headSeat & 1) == 0;
+      const auto ups = rank::computeRatings(a1, a2, b1, b2, evenTeamWins);
+
+      RankUpdate ru;
+      for (const auto& u : ups) {
+        ratings_.setRating(u.playerId, u.newRating);
+        auto* info = ru.add_updates();
+        info->set_player_id(u.playerId);
+        info->set_old_rating(u.oldRating);
+        info->set_new_rating(u.newRating);
+        info->set_delta(u.delta);
+        info->set_tier(rank::tierName(u.newRating));
+      }
+      broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_RankUpdate), serialize(ru));
+    }
   }
 
   int Dispatcher::errorCode(room::PlayResult r) const {
@@ -550,6 +656,7 @@ namespace guandan::proto {
   }
 
   void Dispatcher::onTick(int64_t nowMs) {
+    matchTick(nowMs);
     rooms_.forEachRoom([&](room::Room& room) {
       if (!room.started || room.table.phase() != room::Phase::Playing) return;
 
