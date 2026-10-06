@@ -38,6 +38,19 @@ namespace guandan::room {
     return true;
   }
 
+  bool RoomManager::addBot(const std::string& roomId, int64_t playerId) {
+    auto it = rooms_.find(roomId);
+    if (it == rooms_.end()) return false;
+    Room& room = it->second;
+    if (room.players.size() >= kMaxPlayers) return false;
+    RoomPlayer p;
+    p.playerId = playerId;
+    p.seat = static_cast<int32_t>(room.players.size());
+    p.isBot = true;
+    room.players.push_back(p);
+    return true;
+  }
+
   bool RoomManager::exists(const std::string& roomId) const {
     return rooms_.find(roomId) != rooms_.end();
   }

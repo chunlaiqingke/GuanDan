@@ -48,6 +48,7 @@ message RoomPlayer {
   int64 player_id = 1;
   string name = 2;
   int32 seat = 3;      // 座位号 0~3
+  bool is_bot = 4;
 }
 
 // ---- 2004 S2C_RoomState ----
@@ -152,4 +153,21 @@ message PlayResultMsg {
 // ---- 3012 S2C_PassResult：广播过牌 ----
 message PassResultMsg {
   int64 uid = 1;
+}
+
+// ---- 3013 C2S_AddBot：补位机器人 ----
+message AddBotReq {
+  int32 count = 1;  // 补几个（缺省 1）
+}
+
+// ---- 3014 C2S_Hint：请求提示出牌 ----
+message HintReq {}
+
+// ---- 3015 S2C_HintAck：Top3 推荐 ----
+message HintPlay {
+  repeated int32 cards = 1;
+}
+message HintAck {
+  int32 code = 1;
+  repeated HintPlay plays = 2;
 }

@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "net/WsSession.h"
 #include "room/RoomManager.h"
@@ -35,16 +36,24 @@ namespace guandan::proto {
     void handlePlay(net::WsSession& s, const std::string& body);
     void handlePass(net::WsSession& s, const std::string& body);
     void handleSetHost(net::WsSession& s, const std::string& body);
+    void handleAddBot(net::WsSession& s, const std::string& body);
+    void handleHint(net::WsSession& s, const std::string& body);
 
     void maybeStartGame(const std::string& roomId);
     void beginTurn(room::Room& room);
     void autoResolve(room::Room& room, int seat, int64_t nowMs);
+    void botResolve(room::Room& room, int seat);
+    void broadcastAction(room::Room& room, int64_t uid,
+                         const std::vector<guandan::rules::Card>& cards, bool pass);
+    void afterAction(room::Room& room);
     void broadcastRoundEnd(room::Room& room);
+    bool isBotSeat(const room::Room& room, int seat) const;
     int errorCode(room::PlayResult r) const;
 
     room::RoomManager& rooms_;
     std::unordered_map<int64_t, net::WsSession*> sessions_;
     int64_t nextPlayerId_ = 1;
+    int64_t nextBotId_ = -1;
   };
 
 }  // namespace guandan::proto

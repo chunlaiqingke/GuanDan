@@ -268,6 +268,74 @@ TEST(GameFlowFullRound) {
   th.join();
 }
 
+TEST(GameFlowWithBots) {
+  room::RoomManager rooms;
+  proto::Dispatcher dispatcher(rooms);
+  net::WsServer server;
+  server.setOnBinary([&](net::WsSession& s, const uint8_t* d, size_t n) { dispatcher.onBinary(s, d, n); });
+  server.setOnDisconnect([&](net::WsSession& s) { dispatcher.onDisconnect(s); });
+  server.setOnTick([&](int64_t t) { dispatcher.onTick(t); });
+
+  if (!server.listen(0)) {
+    ::minitest::reportFailure("listen(0) failed", __FILE__, __LINE__);
+    return;
+  }
+  const uint16_t port = server.port();
+  std::thread th([&]() { server.run(); });
+
+  try {
+    const int fd = connectTcp(port);
+    doHandshake(fd);
+    LoginReq login;
+    login.set_uid("human");
+    login.set_token("t");
+    sendMaskedFrame(fd, net::encodeFrame(1001, serialize(login)));
+    recvFrame(fd);  // LoginAck
+
+    std::string roomId;
+    {
+      CreateRoomReq cr;
+      cr.mutable_rule()->set_level(2);
+      sendMaskedFrame(fd, net::encodeFrame(2001, serialize(cr)));
+      const auto f = recvFrame(fd);
+      net::FrameHeader hdr;
+      net::decodeHeader(f.data(), f.size(), hdr);
+      CreateRoomAck ack;
+      ack.ParseFromString(std::string(f.begin() + 8, f.end()));
+      roomId = ack.room_id();
+    }
+
+    // 补 3 个 bot → 满 4 人自动开局
+    AddBotReq abr;
+    abr.set_count(3);
+    sendMaskedFrame(fd, net::encodeFrame(3013, serialize(abr)));
+
+    // 人类托管，让服务端代出
+    SetHostReq shr;
+    shr.set_host(true);
+    sendMaskedFrame(fd, net::encodeFrame(3005, serialize(shr)));
+
+    // 等待一盘结束（RoundEnd）
+    bool roundEnded = false;
+    for (int i = 0; i < 5000 && !roundEnded; ++i) {
+      std::vector<uint8_t> f;
+      while (recvFrameTimeout(fd, 2, f)) {
+        net::FrameHeader hdr;
+        if (!net::decodeHeader(f.data(), f.size(), hdr)) continue;
+        if (hdr.cmd == 3009) roundEnded = true;
+      }
+    }
+
+    EXPECT_TRUE(roundEnded);
+    ::close(fd);
+  } catch (const std::exception& e) {
+    ::minitest::reportFailure(std::string("exception: ") + e.what(), __FILE__, __LINE__);
+  }
+
+  server.stop();
+  th.join();
+}
+
 MINITEST_MAIN()
 
 

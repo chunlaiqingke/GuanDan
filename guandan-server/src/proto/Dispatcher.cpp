@@ -8,6 +8,8 @@
 #include "messages.pb.h"
 #include "net/Frame.h"
 #include "proto/Cmd.h"
+#include "guandan/ai/Strategy.h"
+#include "guandan/Card.h"
 #include "util/Log.h"
 #include "util/Time.h"
 
@@ -58,6 +60,8 @@ namespace guandan::proto {
       case Cmd::C2S_Play: handlePlay(s, body); break;
       case Cmd::C2S_Pass: handlePass(s, body); break;
       case Cmd::C2S_SetHost: handleSetHost(s, body); break;
+      case Cmd::C2S_AddBot: handleAddBot(s, body); break;
+      case Cmd::C2S_Hint: handleHint(s, body); break;
       default:
         GD_LOG_WARN("unknown cmd {}", hdr.cmd);
         sendError(s, 404, "unknown cmd");
@@ -163,6 +167,7 @@ namespace guandan::proto {
         rp->set_player_id(p.playerId);
         rp->set_name(p.name);
         rp->set_seat(p.seat);
+        rp->set_is_bot(p.isBot);
       }
     }
     s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_RoomState), serialize(state)));
@@ -203,6 +208,7 @@ namespace guandan::proto {
         rp->set_player_id(p.playerId);
         rp->set_name(p.name);
         rp->set_seat(p.seat);
+        rp->set_is_bot(p.isBot);
       }
     } else {
       state.set_code(404);
@@ -367,24 +373,17 @@ namespace guandan::proto {
     broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_TurnStart), serialize(ts));
   }
 
-  void Dispatcher::autoResolve(room::Room& room, int seat, int64_t nowMs) {
-    (void)nowMs;
-    const int64_t uid = room.table.playerId(seat);
-    if (room.table.canPass()) {
-      room.table.pass(seat);
-      AutoPlay ap;
-      ap.set_uid(uid);
-      ap.set_is_pass(true);
+  void Dispatcher::broadcastAction(room::Room& room, int64_t uid,
+                                   const std::vector<guandan::rules::Card>& cards, bool pass) {
+    AutoPlay ap;
+    ap.set_uid(uid);
+    ap.set_is_pass(pass);
+    if (pass) {
       broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_AutoPlay), serialize(ap));
       PassResultMsg prm;
       prm.set_uid(uid);
       broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_PassResult), serialize(prm));
     } else {
-      const auto cards = room.table.minSingle(seat);
-      room.table.play(seat, cards);
-      AutoPlay ap;
-      ap.set_uid(uid);
-      ap.set_is_pass(false);
       for (guandan::rules::Card c : cards) ap.add_cards(c);
       broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_AutoPlay), serialize(ap));
       PlayResultMsg prm;
@@ -392,7 +391,9 @@ namespace guandan::proto {
       for (guandan::rules::Card c : cards) prm.add_cards(c);
       broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_PlayResult), serialize(prm));
     }
+  }
 
+  void Dispatcher::afterAction(room::Room& room) {
     if (room.table.phase() == room::Phase::RoundEnd) {
       broadcastRoundEnd(room);
       room.deadlineMs = 0;
@@ -400,6 +401,131 @@ namespace guandan::proto {
     } else {
       beginTurn(room);
     }
+  }
+
+  void Dispatcher::autoResolve(room::Room& room, int seat, int64_t nowMs) {
+    (void)nowMs;
+    const int64_t uid = room.table.playerId(seat);
+    if (room.table.canPass()) {
+      room.table.pass(seat);
+      broadcastAction(room, uid, {}, true);
+    } else {
+      const auto cards = room.table.minSingle(seat);
+      room.table.play(seat, cards);
+      broadcastAction(room, uid, cards, false);
+    }
+    afterAction(room);
+  }
+
+  bool Dispatcher::isBotSeat(const room::Room& room, int seat) const {
+    return seat >= 0 && seat < static_cast<int>(room.players.size()) && room.players[seat].isBot;
+  }
+
+  void Dispatcher::botResolve(room::Room& room, int seat) {
+    const int64_t uid = room.table.playerId(seat);
+    const auto& hand = room.table.hand(seat);
+    const int level = room.table.level();
+    const rules::PatternInfo* last = room.table.canPass() ? &room.table.lastPlay() : nullptr;
+
+    ai::PlayContext ctx;
+    ctx.canPass = room.table.canPass();
+    ctx.lastPlayIsTeammate = room.table.lastPlaySeat() >= 0
+                                 ? room::sameTeam(seat, room.table.lastPlaySeat())
+                                 : false;
+    ctx.minOpponentHand = 99;
+    for (int s = 0; s < 4; ++s) {
+      if (s == seat || room::sameTeam(s, seat)) continue;
+      const int hc = room.table.handCount(s);
+      if (hc < ctx.minOpponentHand) ctx.minOpponentHand = hc;
+    }
+
+    const ai::Decision d = ai::decide(hand, level, last, ctx, ai::Difficulty::Normal);
+    if (d.pass) {
+      if (room.table.canPass()) {
+        room.table.pass(seat);
+        broadcastAction(room, uid, {}, true);
+      } else {
+        const auto safe = room.table.minSingle(seat);
+        room.table.play(seat, safe);
+        broadcastAction(room, uid, safe, false);
+      }
+    } else if (room.table.play(seat, d.cards) == room::PlayResult::Ok) {
+      broadcastAction(room, uid, d.cards, false);
+    } else if (room.table.canPass()) {
+      // 决策与规则引擎罕见不一致：兜底过牌
+      room.table.pass(seat);
+      broadcastAction(room, uid, {}, true);
+    } else {
+      // 领出兜底：最小单张
+      const auto safe = room.table.minSingle(seat);
+      room.table.play(seat, safe);
+      broadcastAction(room, uid, safe, false);
+    }
+    afterAction(room);
+  }
+
+  void Dispatcher::handleAddBot(net::WsSession& s, const std::string& body) {
+    AddBotReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse AddBotReq failed");
+      return;
+    }
+    room::Room* room = rooms_.findMutable(s.roomId());
+    if (!room || room->started) {
+      sendError(s, 404, "room not found or already started");
+      return;
+    }
+    int count = req.count() > 0 ? req.count() : 1;
+    while (count-- > 0) {
+      if (!rooms_.addBot(s.roomId(), nextBotId_)) break;
+      --nextBotId_;
+    }
+    RoomState state;
+    state.set_code(0);
+    state.set_room_id(s.roomId());
+    for (const auto& p : room->players) {
+      auto* rp = state.add_players();
+      rp->set_player_id(p.playerId);
+      rp->set_name(p.name);
+      rp->set_seat(p.seat);
+      rp->set_is_bot(p.isBot);
+    }
+    broadcastRoom(*room, static_cast<uint16_t>(Cmd::S2C_RoomState), serialize(state));
+
+    maybeStartGame(s.roomId());
+  }
+
+  void Dispatcher::handleHint(net::WsSession& s, const std::string& body) {
+    HintReq req;
+    if (!req.ParseFromString(body)) {
+      sendError(s, 400, "parse HintReq failed");
+      return;
+    }
+    room::Room* room = rooms_.findMutable(s.roomId());
+    if (!room || !room->started) {
+      sendError(s, 404, "no active game");
+      return;
+    }
+    const int seat = room::seatOf(*room, s.playerId());
+    if (seat < 0) {
+      sendError(s, 403, "not in room");
+      return;
+    }
+    if (room->table.currentTurn() != seat) {
+      sendError(s, 409, "not your turn");
+      return;
+    }
+    const int level = room->table.level();
+    const rules::PatternInfo* last = room->table.canPass() ? &room->table.lastPlay() : nullptr;
+    const auto plays = ai::hint(room->table.hand(seat), level, last);
+
+    HintAck ack;
+    ack.set_code(0);
+    for (const auto& p : plays) {
+      auto* hp = ack.add_plays();
+      for (guandan::rules::Card c : p.cards) hp->add_cards(c);
+    }
+    s.sendBinary(net::encodeFrame(static_cast<uint16_t>(Cmd::S2C_HintAck), serialize(ack)));
   }
 
   void Dispatcher::broadcastRoundEnd(room::Room& room) {
@@ -426,26 +552,36 @@ namespace guandan::proto {
   void Dispatcher::onTick(int64_t nowMs) {
     rooms_.forEachRoom([&](room::Room& room) {
       if (!room.started || room.table.phase() != room::Phase::Playing) return;
-      const int seat = room.table.currentTurn();
-      if (seat < 0) return;
 
-      if (room.hostMode[seat]) {
-        autoResolve(room, seat, nowMs);
-        return;
+      // 连续自动（Bot/托管/超时）在同一次 tick 内尽量一次清完，避免每次 poll 只动一步。
+      for (int guard = 0; guard < 128; ++guard) {
+        if (room.table.phase() != room::Phase::Playing) break;
+        const int seat = room.table.currentTurn();
+        if (seat < 0) break;
+
+        if (isBotSeat(room, seat)) {
+          botResolve(room, seat);
+        } else if (room.hostMode[seat]) {
+          autoResolve(room, seat, nowMs);
+        } else if (room.deadlineMs > 0 && nowMs >= room.deadlineMs) {
+          ++room.timeoutCount[seat];
+          autoResolve(room, seat, nowMs);
+        } else {
+          break;  // 需要真人操作
+        }
       }
 
-      if (room.deadlineMs > 0 && nowMs >= room.deadlineMs) {
-        ++room.timeoutCount[seat];
-        autoResolve(room, seat, nowMs);
-        return;
-      }
-
-      if (room.nextTickMs > 0 && nowMs >= room.nextTickMs && room.deadlineMs > nowMs) {
-        const int remain = static_cast<int>(room.deadlineMs - nowMs);
-        Tick tick;
-        tick.set_remain_ms(remain);
-        broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_Tick), serialize(tick));
-        room.nextTickMs = nowMs + 1000;
+      // 最后 5s 推 Tick
+      if (room.table.phase() == room::Phase::Playing) {
+        const int seat = room.table.currentTurn();
+        if (seat >= 0 && room.nextTickMs > 0 && nowMs >= room.nextTickMs &&
+            room.deadlineMs > nowMs) {
+          const int remain = static_cast<int>(room.deadlineMs - nowMs);
+          Tick tick;
+          tick.set_remain_ms(remain);
+          broadcastRoom(room, static_cast<uint16_t>(Cmd::S2C_Tick), serialize(tick));
+          room.nextTickMs = nowMs + 1000;
+        }
       }
     });
   }

@@ -36,3 +36,8 @@ add_executable(test_game_flow test_game_flow.cpp)
 target_link_libraries(test_game_flow PRIVATE guandan_core Threads::Threads)
 target_include_directories(test_game_flow PRIVATE ${MINITEST_INCLUDE})
 add_test(NAME test_game_flow COMMAND test_game_flow)
+
+add_executable(test_ai test_ai.cpp)
+target_link_libraries(test_ai PRIVATE guandan_core)
+target_include_directories(test_ai PRIVATE ${MINITEST_INCLUDE})
+add_test(NAME test_ai COMMAND test_ai)

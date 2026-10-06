@@ -15,6 +15,7 @@ namespace guandan::room {
     int64_t playerId = 0;
     std::string name;
     int32_t seat = 0;
+    bool isBot = false;
   };
 
   struct Room {
@@ -44,6 +45,7 @@ namespace guandan::room {
    public:
     std::string createRoom(int64_t hostPlayerId);
     bool joinRoom(const std::string& roomId, int64_t playerId);
+    bool addBot(const std::string& roomId, int64_t playerId);
     bool exists(const std::string& roomId) const;
     const Room* find(const std::string& roomId) const;
     Room* findMutable(const std::string& roomId);
