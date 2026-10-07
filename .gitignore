@@ -26,6 +26,7 @@ guandan-client/**/*.d.ts.map
 guandan-client/native/build/
 guandan-client/native/engine/
 guandan-client/platforms/
+guandan-client/.creator/
 # 生成的 protobuf ts 代码（如果由脚本生成，可忽略；若手改则别忽略）
 # guandan-client/assets/scripts/net/pb/
 

@@ -1,16 +1,24 @@
 import { _decorator, Component } from 'cc';
-import { bootstrapClient, ClientSession } from './Scenes';
+import { WsClient } from '../net/WsClient';
+import { LobbyController } from './LobbyController';
+import { TableController } from './TableController';
+import { ConsoleView } from './ConsoleView';
 
 const { ccclass } = _decorator;
 
-// 占位启动组件：挂到场景任意节点即可连接服务端，先用文字视图(ConsoleView)驱动。
-// 后续在 Cocos 里实现 TableView 接口的组件，替换 Scenes 里的 ConsoleView 即可接上真实渲染。
+// 占位启动组件：挂到场景任意节点后点「预览」即可自动运行。
+// 连上服务端后：登录 → 建房 → 补 3 个 Bot（满 4 人自动开局），用文字视图(ConsoleView)在控制台打印整局。
 @ccclass('Bootstrap')
 export class Bootstrap extends Component {
-  session: ClientSession | null = null;
-
   start(): void {
-    // 开发环境连本机服务端；生产改 wss://域名/ws
-    this.session = bootstrapClient('ws://127.0.0.1:9001');
+    const ws = new WsClient();
+    const lobby = new LobbyController(ws);
+    new TableController(ws, new ConsoleView()); // 绑定 S2C → 文字视图
+
+    ws.connect('ws://127.0.0.1:9001', () => {
+      lobby.login('demo_' + Date.now(), 'token');
+      lobby.createRoom(2); // 级牌打 2
+      lobby.addBot(3);     // 补 3 个 Bot → 满 4 人自动开局
+    });
   }
 }
