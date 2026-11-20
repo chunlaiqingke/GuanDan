@@ -20,6 +20,7 @@ export class LoginScene extends Component {
   }
 
   private onLoginClicked(): void {
+    //todo
     const uid = this.uidBox.string.trim() || 'guest';
     const token = this.tokenBox.string.trim() || 'token';
     session.login(uid, token);
